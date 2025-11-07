@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtualenv
+venv/
+env/
+
+# Flask uploads
+uploads/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Configs sensibles
+config.json
