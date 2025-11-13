@@ -2,6 +2,8 @@ import mysql.connector
 from neo4j import GraphDatabase
 from typing import Dict, Any
 from decimal import Decimal
+from flask import request
+import time
 
 # ---------- Helpers MySQL ----------
 def connect_mysql(host, user, password, db=None):
@@ -151,6 +153,94 @@ def get_neo4j_graph_data(driver, db_name):
         "message": f"Graphe créé avec {len(nodes)} nœuds et {len(edges)} relations"
     }
 
+
+# ---------- Query helpers (SQL execution, SQL->Cypher simple translator, Cypher execution)
+import time
+import re
+
+def execute_sql_query(conn, sql):
+    """Execute une requête SQL et renvoie (rows:list[dict], elapsed_seconds:float)."""
+    cur = conn.cursor()
+    start = time.time()
+    cur.execute(sql)
+    cols = [d[0] for d in cur.description] if cur.description else []
+    rows = [dict(zip(cols, r)) for r in cur.fetchall()] if cols else []
+    elapsed = time.time() - start
+    cur.close()
+    return {"columns": cols, "rows": rows}, elapsed
+
+
+def translate_sql_to_cypher(sql: str):
+    """Very small heuristic translator from simple SELECT SQL to Cypher.
+
+    Supported forms (case-insensitive):
+      SELECT * FROM table WHERE col = 'value' LIMIT n
+      SELECT col1, col2 FROM table WHERE ... LIMIT n
+
+    Returns a Cypher string or None if unsupported.
+    """
+    s = sql.strip().strip(';')
+    # Normalize spacing
+    s_norm = re.sub(r"\s+", " ", s).strip()
+    m = re.match(r"(?i)^SELECT\s+(?P<cols>\*|[\w`,\s]+)\s+FROM\s+`?(?P<table>\w+)`?(?:\s+WHERE\s+(?P<where>.+?))?(?:\s+LIMIT\s+(?P<limit>\d+))?$", s_norm)
+    if not m:
+        return None
+    cols = m.group('cols').strip()
+    table = m.group('table').strip()
+    where = m.group('where')
+    limit = m.group('limit')
+
+    label = label_for_table(table)
+
+    where_clause = ''
+    if where:
+        # Support simple expressions: a = 'b' AND c = 12
+        # Convert `col = value` to `n.col = value` (keep quotes)
+        # Replace backticks
+        w = where.replace('`', '')
+        # add prefix n. to left-hand columns
+        def repl(mo):
+            left = mo.group(1)
+            op = mo.group(2)
+            right = mo.group(3)
+            left = left.strip()
+            return f"n.{left} {op} {right}"
+        w = re.sub(r"(?i)([\w]+)\s*(=|<>|!=|<|>|<=|>=)\s*([^\s]+)", repl, w)
+        where_clause = f"WHERE {w}"
+
+    if cols == '*':
+        return f"MATCH (n:{label}) {where_clause} RETURN n{f' LIMIT {limit}' if limit else ''}"
+    else:
+        # Build RETURN listing selected properties
+        cols_list = [c.strip().replace('`','') for c in cols.split(',')]
+        projection = ', '.join([f"n.{c} AS {c}" for c in cols_list])
+        return f"MATCH (n:{label}) {where_clause} RETURN {projection}{f' LIMIT {limit}' if limit else ''}"
+
+
+def execute_cypher(driver, db_name, cypher):
+    """Execute cypher and return (rows:list[dict], elapsed_seconds:float)."""
+    start = time.time()
+    rows = []
+    with driver.session(database=db_name) as session:
+        result = session.run(cypher)
+        for record in result:
+            # convert record to dict
+            d = {}
+            for k in record.keys():
+                val = record.get(k)
+                # If value is neo4j Node or Relationship, convert to dict
+                try:
+                    # node-like: has .id and .items()
+                    if hasattr(val, 'items'):
+                        d[k] = dict(val.items())
+                    else:
+                        d[k] = val
+                except Exception:
+                    d[k] = val
+            rows.append(d)
+    elapsed = time.time() - start
+    return {"rows": rows}, elapsed
+
 # ---------- Main Conversion ----------
 def process_sql_to_neo4j(sql_path, mysql_host, mysql_user, mysql_password,
                           mysql_db, neo4j_uri, neo4j_user, neo4j_password,
@@ -204,3 +294,7 @@ def process_sql_to_neo4j(sql_path, mysql_host, mysql_user, mysql_password,
 
     except Exception as e:
         if progress: progress.update({"percent":100,"message":str(e)})
+
+
+
+

@@ -1,0 +1,62 @@
+/* Minimal global styles for My2Neo */
+body { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; background: linear-gradient(180deg, #f6fbff 0%, #f2f8ff 100%); color: #0f1724; }
+
+:root{
+	--primary-50: #e8f0ff;
+	--primary-100: #d0e1ff;
+	--primary-200: #a9c9ff;
+	--primary-400: #4f90ff;
+	--primary: #0d6efd; /* bootstrap blue */
+	--primary-700: #0b5ed7;
+	--muted: #6b7280;
+	--card-bg: #ffffff;
+	--surface: #f8fbff;
+}
+
+.card { border-radius: 0.6rem; background: var(--card-bg); box-shadow: 0 6px 18px rgba(14,30,60,0.06); border: 1px solid rgba(15,23,36,0.04); }
+.text-primary { color: var(--primary) !important; }
+.bg-primary { background-color: var(--primary) !important; color: white !important; }
+.btn-primary { background: linear-gradient(180deg,var(--primary),var(--primary-700)); border-color: var(--primary-700); color: #fff; }
+.btn-primary:hover{ filter:brightness(.95); }
+.table-sm td, .table-sm th { font-size: .85rem; }
+.navbar-brand { font-weight:700; color:var(--primary); }
+
+/* accents */
+.card-title { color: rgba(15,23,36,0.9); font-weight:600; }
+.small.text-muted { color: var(--muted) !important; }
+
+/* Table header subtle blue */
+.table thead th { background: linear-gradient(180deg, rgba(13,110,253,0.04), rgba(13,110,253,0.02)); }
+
+/* form controls subtle focus */
+.form-control:focus { box-shadow: 0 0 0 .15rem rgba(13,110,253,0.12); border-color: var(--primary-400); }
+
+/* pre & textarea styling */
+pre#cypherBox { background: #fbfdff; border-left: 3px solid var(--primary-100); }
+textarea { background: #fff; border: 1px solid rgba(15,23,36,0.06); }
+
+/* make network container responsive on small screens */
+#network-container { min-height: 320px; }
+
+/* Layout / Flex fixes for Firefox and responsive behavior */
+html, body { height: 100%; }
+
+/* Ensure cards using h-100 behave properly in Firefox: allow their flex children to shrink
+	by setting min-height: 0 on the card body and scroll containers. This prevents overflow
+	that breaks the two-column balance when resizing the window (common in Firefox). */
+.card.h-100 { display: flex; flex-direction: column; }
+.card .card-body { min-height: 0; }
+.card .card-body .table-responsive { min-height: 0; }
+
+/* Make textareas and pre blocks respect available space and be scrollable instead of
+	forcing the card to grow. Use sane max-heights that adapt to viewport height. */
+textarea.flex-fill { min-height: 0; max-height: calc(36vh); overflow: auto; }
+pre#cypherBox { max-height: calc(28vh); overflow: auto; }
+
+/* Small screens: stack columns and keep spacing comfortable */
+@media (max-width: 767px) {
+  pre#cypherBox, textarea.flex-fill { max-height: 220px; }
+}
+
+/* Utility: smooth scrollbar on supported browsers */
+* { scrollbar-width: auto; scrollbar-color: rgba(13,110,253,0.2) transparent; }
