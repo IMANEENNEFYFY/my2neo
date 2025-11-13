@@ -1,9 +1,9 @@
-# musqltoneo4j.py
 import mysql.connector
 from neo4j import GraphDatabase
 from typing import Dict, Any
+from decimal import Decimal
 
-# ------------------- Helpers MySQL -------------------
+# ---------- Helpers MySQL ----------
 def connect_mysql(host, user, password, db=None):
     cfg = {"host": host, "user": user, "password": password, "autocommit": True}
     if db:
@@ -38,11 +38,8 @@ def export_rows(conn, table):
 def label_for_table(table):
     return ''.join(part.capitalize() for part in table.split('_'))
 
-# ------------------- Helpers Neo4j -------------------
+# ---------- Helpers Neo4j ----------
 def sanitize_db_name(name: str) -> str:
-    """
-    Transforme le nom en un nom Neo4j valide : uniquement lettres et chiffres
-    """
     return ''.join(c for c in name if c.isalnum())
 
 def ensure_neo4j_database(driver, db_name: str) -> str:
@@ -51,10 +48,10 @@ def ensure_neo4j_database(driver, db_name: str) -> str:
         existing = [r["name"] for r in session.run("SHOW DATABASES")]
         if valid_db_name not in existing:
             session.run(f"CREATE DATABASE {valid_db_name}")
-        
-        # Attendre que la DB soit ONLINE
         while True:
-            status = session.run(f"SHOW DATABASES YIELD name, currentStatus WHERE name='{valid_db_name}'").single()
+            status = session.run(
+                f"SHOW DATABASES YIELD name, currentStatus WHERE name='{valid_db_name}'"
+            ).single()
             if status and status["currentStatus"] == "online":
                 break
     return valid_db_name
@@ -63,14 +60,19 @@ def create_nodes(driver, table, rows, db_name):
     if not rows:
         return
     label = label_for_table(table)
+    props_list = []
+    for r in rows:
+        props = {}
+        for k, v in r.items():
+            props[k] = float(v) if isinstance(v, Decimal) else v
+        props_list.append(props)
+    pk = "id" if "id" in props_list[0] else list(props_list[0].keys())[0]
+    cypher = f"""
+    UNWIND $rows AS row
+    MERGE (n:{label} {{ {pk}: row.{pk} }})
+    SET n += row
+    """
     with driver.session(database=db_name) as session:
-        props_list = [{k:v for k,v in r.items() if v is not None} for r in rows]
-        pk = "id" if "id" in props_list[0] else list(props_list[0].keys())[0]
-        cypher = f"""
-        UNWIND $rows AS row
-        MERGE (n:{label} {{ {pk}: row.{pk} }})
-        SET n += row
-        """
         session.run(cypher, {"rows": props_list})
 
 def create_relationships(driver, table, fks, rows, db_name):
@@ -91,13 +93,73 @@ def create_relationships(driver, table, fks, rows, db_name):
             """
             session.run(cypher, {"rows": rows})
 
-# ------------------- Main Conversion -------------------
+def get_neo4j_graph_data(driver, db_name):
+    """Récupère les nœuds et relations du graphe Neo4j"""
+    nodes = []
+    edges = []
+    node_map = {}  # Pour éviter les doublons
+    
+    with driver.session(database=db_name) as session:
+        # Récupérer tous les nœuds
+        result = session.run("MATCH (n) RETURN n LIMIT 1000")
+        node_id = 0
+        for record in result:
+            node = record["n"]
+            node_key = str(node.id)
+            if node_key not in node_map:
+                labels = list(node.labels)
+                props = dict(node)
+                label = labels[0] if labels else "Node"
+                
+                node_map[node_key] = node_id
+                nodes.append({
+                    "id": node_id,
+                    "label": f"{label}",
+                    "title": f"{label}: {str(props)[:100]}",
+                    "group": label
+                })
+                node_id += 1
+        
+        # Récupérer toutes les relations
+        result = session.run("MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 1000")
+        edge_id = 0
+        seen_edges = set()
+        for record in result:
+            a = record["a"]
+            rel = record["r"]
+            b = record["b"]
+            
+            a_key = str(a.id)
+            b_key = str(b.id)
+            
+            # Éviter les doublons
+            edge_key = (a_key, b_key, rel.type)
+            if edge_key not in seen_edges:
+                seen_edges.add(edge_key)
+                edges.append({
+                    "id": edge_id,
+                    "from": node_map.get(a_key, 0),
+                    "to": node_map.get(b_key, 0),
+                    "label": rel.type,
+                    "arrows": "to"
+                })
+                edge_id += 1
+    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "message": f"Graphe créé avec {len(nodes)} nœuds et {len(edges)} relations"
+    }
+
+# ---------- Main Conversion ----------
 def process_sql_to_neo4j(sql_path, mysql_host, mysql_user, mysql_password,
                           mysql_db, neo4j_uri, neo4j_user, neo4j_password,
                           progress: Dict[str,Any]=None):
     try:
         if progress: progress.update({"percent":5,"message":"Connexion à MySQL..."})
         conn = connect_mysql(mysql_host, mysql_user, mysql_password)
+
+        # Création de la base MySQL
         cur = conn.cursor()
         cur.execute(f"DROP DATABASE IF EXISTS `{mysql_db}`")
         cur.execute(f"CREATE DATABASE `{mysql_db}`")
@@ -105,7 +167,7 @@ def process_sql_to_neo4j(sql_path, mysql_host, mysql_user, mysql_password,
         cur.close()
         if progress: progress.update({"percent":15,"message":f"Base MySQL `{mysql_db}` prête !"})
 
-        # Import SQL
+        # Import du fichier SQL
         with open(sql_path,"r",encoding="utf-8") as f:
             statements = [stmt for stmt in f.read().split(";") if stmt.strip()]
         conn = connect_mysql(mysql_host, mysql_user, mysql_password, mysql_db)
@@ -118,15 +180,13 @@ def process_sql_to_neo4j(sql_path, mysql_host, mysql_user, mysql_password,
                                  "message":f"Import SQL {i}/{total}"})
         cur.close()
 
-        # Connect Neo4j
+        # Connexion Neo4j
         if progress: progress.update({"percent":50,"message":"Connexion à Neo4j..."})
         driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
-
-        # Crée une nouvelle base Neo4j
         neo_db = ensure_neo4j_database(driver, mysql_db)
         if progress: progress.update({"percent":55,"message":f"Base Neo4j `{neo_db}` prête !"})
 
-        # Convert tables
+        # Conversion tables → noeuds et relations
         tables = get_tables(conn)
         total_tables = len(tables)
         for i, t in enumerate(tables,1):
@@ -141,26 +201,6 @@ def process_sql_to_neo4j(sql_path, mysql_host, mysql_user, mysql_password,
         conn.close()
         driver.close()
         if progress: progress.update({"percent":100,"message":"Conversion terminée avec succès !"})
+
     except Exception as e:
         if progress: progress.update({"percent":100,"message":str(e)})
-
-# ------------------- CLI -------------------
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) < 9:
-        print("Usage: python musqltoneo4j.py <fichier_sql> <mysql_host> <mysql_user> <mysql_password> <mysql_db> <neo4j_uri> <neo4j_user> <neo4j_password>")
-        sys.exit(1)
-
-    sql_file = sys.argv[1]
-    mysql_host, mysql_user, mysql_password, mysql_db, neo4j_uri, neo4j_user, neo4j_password = sys.argv[2:10]
-
-    process_sql_to_neo4j(
-        sql_file,
-        mysql_host,
-        mysql_user,
-        mysql_password,
-        mysql_db,
-        neo4j_uri,
-        neo4j_user,
-        neo4j_password
-    )

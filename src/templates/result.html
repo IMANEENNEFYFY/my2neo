@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Résultat Conversion</title>
+<script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+body { font-family: Arial,sans-serif; background:#f0f4f8; margin:0; padding:20px;}
+.container { display:flex; gap:20px; flex-wrap:wrap; }
+.panel { background:white; border-radius:10px; padding:20px; flex:1; min-width:400px; box-shadow:0 5px 15px rgba(0,0,0,0.1); overflow:auto; max-height:90vh;}
+h2 { text-align:center; color:#00796b; margin-top:0; }
+table { width:100%; border-collapse:collapse; margin-top:10px; font-size:12px;}
+th, td { border:1px solid #ccc; padding:8px; text-align:left; }
+th { background:#e0f2f1; font-weight:bold; }
+.message { font-weight:bold; text-align:center; margin:15px 0; color:#004d40; padding:10px; background:#e0f2f1; border-radius:5px; }
+#network-container { width:100%; height:600px; border:2px solid #00796b; border-radius:5px; background:#fafafa; }
+.stats { display:flex; gap:20px; margin-bottom:15px; }
+.stat-item { flex:1; padding:10px; background:#f5f5f5; border-radius:5px; text-align:center; }
+.stat-item h3 { margin:0 0 5px 0; color:#00796b; font-size:14px; }
+.stat-item p { margin:0; font-size:20px; font-weight:bold; color:#1976d2; }
+.graph-panel { flex:1; min-width:500px; }
+</style>
+</head>
+<body>
+<h1 style="text-align:center; color:#00796b;">Résultat Conversion MySQL → Neo4j</h1>
+<div class="container">
+  <div class="panel">
+    <h2>📊 Structure MySQL</h2>
+    {% if mysql_structure %}
+      {% for table, columns in mysql_structure.items() %}
+        <h3>{{ table }}</h3>
+        <table>
+          <tr>
+            {% for key in columns[0].keys() %}
+              <th>{{ key }}</th>
+            {% endfor %}
+          </tr>
+          {% for row in columns %}
+            <tr>
+              {% for value in row.values() %}
+                <td>{{ value }}</td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </table>
+      {% endfor %}
+    {% else %}
+      <p style="text-align:center; color:#999;">Aucune donnée MySQL disponible</p>
+    {% endif %}
+  </div>
+
+  <div class="panel graph-panel">
+    <h2>🔗 Graphe Neo4j</h2>
+    <div class="message">{{ neo4j_graph.message }}</div>
+    
+    {% if neo4j_graph.nodes %}
+      <div class="stats">
+        <div class="stat-item">
+          <h3>Nœuds</h3>
+          <p>{{ neo4j_graph.nodes|length }}</p>
+        </div>
+        <div class="stat-item">
+          <h3>Relations</h3>
+          <p>{{ neo4j_graph.edges|length }}</p>
+        </div>
+      </div>
+      
+      <div id="network-container"></div>
+      
+      <div style="margin-top:20px;">
+        <h3>Détails des Nœuds</h3>
+        <table>
+          <tr>
+            <th>ID</th>
+            <th>Label</th>
+            <th>Groupe</th>
+          </tr>
+          {% for node in neo4j_graph.nodes %}
+            <tr>
+              <td>{{ node.id }}</td>
+              <td>{{ node.label }}</td>
+              <td>{{ node.group }}</td>
+            </tr>
+          {% endfor %}
+        </table>
+      </div>
+
+      <div style="margin-top:20px;">
+        <h3>Détails des Relations</h3>
+        <table>
+          <tr>
+            <th>De</th>
+            <th>Vers</th>
+            <th>Type de Relation</th>
+          </tr>
+          {% for edge in neo4j_graph.edges %}
+            <tr>
+              <td>{{ edge.from }}</td>
+              <td>{{ edge.to }}</td>
+              <td>{{ edge.label }}</td>
+            </tr>
+          {% endfor %}
+        </table>
+      </div>
+
+      <script type="text/javascript">
+        const nodesData = {{ neo4j_graph.nodes|tojson }};
+        const edgesData = {{ neo4j_graph.edges|tojson }};
+        
+        const nodes = new vis.DataSet(nodesData);
+        const edges = new vis.DataSet(edgesData);
+        
+        const container = document.getElementById('network-container');
+        const data = {
+          nodes: nodes,
+          edges: edges
+        };
+        
+        const options = {
+          physics: {
+            enabled: true,
+            stabilization: {
+              iterations: 200
+            },
+            barnesHut: {
+              gravitationalConstant: -26000,
+              centralGravity: 0.3,
+              springLength: 200,
+              springConstant: 0.04
+            }
+          },
+          nodes: {
+            shape: "dot",
+            scaling: {
+              label: {
+                enabled: true,
+                min: 14,
+                max: 30
+              }
+            },
+            font: {
+              size: 16,
+              color: '#000'
+            },
+            margin: 10,
+            widthConstraint: {
+              maximum: 80
+            }
+          },
+          edges: {
+            arrows: {
+              to: {enabled: true, scaleFactor: 0.5}
+            },
+            smooth: {
+              type: "continuous"
+            },
+            font: {
+              size: 12,
+              align: 'middle'
+            },
+            color: {
+              color: '#999',
+              highlight: '#ff6b6b'
+            }
+          },
+          interaction: {
+            navigationButtons: true,
+            keyboard: true,
+            hover: true
+          }
+        };
+        
+        const network = new vis.Network(container, data, options);
+      </script>
+    {% else %}
+      <p style="text-align:center; color:#999;">Aucun graphe disponible. Veuillez d'abord effectuer une conversion.</p>
+    {% endif %}
+  </div>
+</div>
+</body>
+</html>

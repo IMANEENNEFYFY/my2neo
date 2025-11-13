@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Convertisseur MySQL → Neo4j</title>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis-network.min.css" rel="stylesheet">
+<style>
+body { font-family: Arial,sans-serif; background:#f0f4f8; margin:0; padding:0;}
+.container { padding:30px 40px; max-width:800px; margin:auto; }
+h1 { text-align:center; color:#00796b; margin-bottom:25px; }
+label, input, button { display:block; width:100%; margin-top:10px; }
+button { background:#00796b; color:white; padding:12px; border:none; border-radius:6px; cursor:pointer; }
+button:hover { background:#004d40; }
+.progress { width:100%; background:#eee; border-radius:8px; margin-top:20px; }
+.progress-bar { width:0%; height:20px; background:#4caf50; text-align:center; color:white; border-radius:8px; }
+.message { margin-top:15px; white-space: pre-line; font-weight:bold; max-height:200px; overflow:auto; }
+#network { height:500px; border:1px solid #ccc; margin-top:20px; border-radius:10px; background:white; }
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Convertisseur MySQL → Neo4j</h1>
+<form id="convertForm" enctype="multipart/form-data">
+  <label>Fichier SQL :</label><input type="file" name="sql_file" required>
+  <label>MySQL - Hôte :</label><input type="text" name="mysql_host" value="localhost" required>
+  <label>MySQL - Utilisateur :</label><input type="text" name="mysql_user" value="root" required>
+  <label>MySQL - Mot de passe :</label><input type="password" name="mysql_password">
+  <label>MySQL - Base :</label><input type="text" name="mysql_db" required>
+  <label>Neo4j - URI :</label><input type="text" name="neo4j_uri" value="bolt://localhost:7687" required>
+  <label>Neo4j - Utilisateur :</label><input type="text" name="neo4j_user" value="neo4j" required>
+  <label>Neo4j - Mot de passe :</label><input type="password" name="neo4j_password" required>
+  <button type="submit">Lancer la conversion</button>
+</form>
+
+<div class="progress">
+  <div class="progress-bar" id="progressBar">0%</div>
+</div>
+<div class="message" id="messageBox"></div>
+
+<div id="network"></div>
+
+<script>
+const form = document.getElementById('convertForm');
+const progressBar = document.getElementById('progressBar');
+const messageBox = document.getElementById('messageBox');
+const networkContainer = document.getElementById('network');
+let network = null;
+
+form.addEventListener('submit', (e) => {
+  e.preventDefault();
+  messageBox.textContent = '';
+  progressBar.style.width = '0%';
+  progressBar.textContent = '0%';
+
+  const formData = new FormData(form);
+
+  fetch('/start_conversion', { method:'POST', body:formData })
+  .then(() => {
+    const interval = setInterval(async () => {
+      const res = await fetch('/progress');
+      const data = await res.json();
+      progressBar.style.width = data.percent + '%';
+      progressBar.textContent = data.percent + '%';
+      messageBox.textContent = data.message;
+
+      if (data.percent >= 100) {
+        clearInterval(interval);
+        window.location.href = "/results"; // redirige vers la page des résultats
+      }
+    }, 500);
+  });
+
+});
+
+async function loadGraph() {
+  const res = await fetch('/graph_data');
+  const data = await res.json();
+
+  const nodes = new vis.DataSet(data.nodes);
+  const edges = new vis.DataSet(data.edges);
+
+  const options = {
+    nodes: { shape: 'dot', size: 16, font: { size:14 } },
+    edges: { arrows: 'to', smooth: true },
+    physics: { stabilization: true }
+  };
+
+  network = new vis.Network(networkContainer, { nodes, edges }, options);
+}
+</script>
+</body>
+</html>
